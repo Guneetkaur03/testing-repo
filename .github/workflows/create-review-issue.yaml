@@ -32,14 +32,14 @@ jobs:
 
           if [[ "$TITLE" == Review\ Issue* ]]; then
             echo "⏭ Skipping: This is already a review issue"
-            exit 0
+            exit 78
           fi
 
           OPEN_REVIEW=$(echo "$BODY" | grep -i "Open Review Issue:" | grep -oEi "true|false" | head -n1)
           OPEN_REVIEW=${OPEN_REVIEW,,}
           if [[ -z "$OPEN_REVIEW" || "$OPEN_REVIEW" != "true" ]]; then
             echo "⏭ Skipping: Open Review Issue not set to true"
-            exit 0
+            exit 78
           fi
 
           ASSIGNEE=$(echo "$BODY" | grep -i "Assign To:" | sed -E 's/.*Assign To:\s*//i' | sed 's/@//g' | xargs)
@@ -120,6 +120,11 @@ jobs:
           ISSUE_ID="${{ steps.new_issue.outputs.node_id }}"
           if [[ -z "$ISSUE_ID" ]]; then
             ISSUE_ID="${{ steps.review_issue_check.outputs.issue_id }}"
+          fi
+
+          if [[ -z "$ISSUE_ID" ]]; then
+            echo "❌ No valid ISSUE_ID found to assign to project"
+            exit 1
           fi
 
           proj_node=$(gh api graphql -f query='
