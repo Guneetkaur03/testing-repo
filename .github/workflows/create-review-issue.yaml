@@ -1,0 +1,136 @@
+name: Create Review Issue on Issue Close
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  create_review_issue:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+
+    steps:
+      - name: Parse issue body
+        id: parse
+        run: |
+          BODY="${{ github.event.issue.body }}"
+
+          OPEN_REVIEW=$(echo "$BODY" | grep -i "Open Review Issue:" | grep -oEi "true|false" | head -n1)
+          ASSIGNEE=$(echo "$BODY" | grep -i "Assign To:" | sed -E 's/.*Assign To:\s*//i' | sed 's/@//g' | xargs)
+
+          echo "open_review=${OPEN_REVIEW,,}" >> $GITHUB_OUTPUT
+          echo "assignee=$ASSIGNEE" >> $GITHUB_OUTPUT
+
+      - name: Create review issue
+        if: steps.parse.outputs.open_review == 'true'
+        id: new_issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const original = context.payload.issue;
+            const newIssue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Review Issue ${original.number}`,
+              body: `Auto-generated review issue for [#${original.number}](${original.html_url})`,
+              assignees: ['${{ steps.parse.outputs.assignee }}'],
+              labels: ['review']
+            });
+            core.setOutput("issue_number", newIssue.data.number);
+            core.setOutput("node_id", newIssue.data.node_id);
+
+      - name: Add new issue to "Pontem Scheduling" project
+        uses: actions/github-script@v6
+        id: project_item
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+        with:
+          script: |
+            const issueNodeId = "${{ steps.new_issue.outputs.node_id }}";
+            const org = context.repo.owner;
+            const desiredProjectName = "Pontem Scheduling";
+
+            const projectRes = await github.graphql(`
+              query($org: String!) {
+                organization(login: $org) {
+                  projectsV2(first: 100) {
+                    nodes { id name }
+                  }
+                }
+              }`, { org });
+
+            const project = projectRes.organization.projectsV2.nodes.find(p => p.name === desiredProjectName);
+            if (!project) throw new Error(`❌ Project "${desiredProjectName}" not found`);
+
+            const addedItem = await github.graphql(`
+              mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: {
+                  projectId: $projectId,
+                  contentId: $contentId
+                }) {
+                  item { id }
+                }
+              }`, {
+                projectId: project.id,
+                contentId: issueNodeId
+              });
+
+            core.setOutput("project_id", project.id);
+            core.setOutput("item_id", addedItem.addProjectV2ItemById.item.id);
+
+      - name: Set Status to Ready in Pontem Scheduling
+        uses: actions/github-script@v6
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+        with:
+          script: |
+            const projectId = "${{ steps.project_item.outputs.project_id }}";
+            const itemId = "${{ steps.project_item.outputs.item_id }}";
+            const statusFieldName = "Status";
+            const desiredStatus = "Ready";
+
+            const fieldsRes = await github.graphql(`
+              query($projectId: ID!) {
+                node(id: $projectId) {
+                  ... on ProjectV2 {
+                    fields(first: 50) {
+                      nodes {
+                        id
+                        name
+                        ... on ProjectV2SingleSelectField {
+                          options { id name }
+                        }
+                      }
+                    }
+                  }
+                }
+              }`, { projectId });
+
+            const statusField = fieldsRes.node.fields.nodes.find(f => f.name === statusFieldName);
+            if (!statusField) throw new Error(`❌ Field "${statusFieldName}" not found`);
+
+            const option = statusField.options.find(o => o.name.toLowerCase() === desiredStatus.toLowerCase());
+            if (!option) throw new Error(`❌ Option "${desiredStatus}" not found in field "${statusFieldName}"`);
+
+            await github.graphql(`
+              mutation($itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: "${projectId}",
+                  itemId: $itemId,
+                  fieldId: $fieldId,
+                  value: { singleSelectOptionId: $optionId }
+                }) {
+                  projectV2Item { id }
+                }
+              }`, {
+                itemId,
+                fieldId: statusField.id,
+                optionId: option.id
+              });
+
+            console.log(`✅ Status set to "${desiredStatus}" in project "Pontem Scheduling"`);
