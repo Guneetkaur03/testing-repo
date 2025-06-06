@@ -66,7 +66,7 @@ jobs:
       - name: Add to Pontem Scheduling project and set status to Ready
         if: steps.new_issue.outputs.node_id
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+          GH_TOKEN: ${{ github.token }}
           ISSUE_ID: ${{ steps.new_issue.outputs.node_id }}
           PROJECT_URL: ${{ env.PROJECT_URL }}
         run: |
