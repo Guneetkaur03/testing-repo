@@ -38,8 +38,10 @@ jobs:
           result=$(gh issue list --search "Review Issue ${{ github.event.issue.number }} in:title" --json number,title --jq ".[] | select(.title == \"Review Issue ${{ github.event.issue.number }}\")")
           if [[ -n "$result" ]]; then
             echo "exists=true" >> $GITHUB_OUTPUT
+            echo "::notice title=Exists Output::Review issue exists = true"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
+            echo "::notice title=Exists Output::Review issue exists = false"
           fi
         env:
           GH_TOKEN: ${{ github.token }}
