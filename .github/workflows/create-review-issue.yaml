@@ -73,7 +73,7 @@ jobs:
             echo "Review issue found: #$issue_number ($state)"
             echo "exists=true" >> $GITHUB_OUTPUT
             # Validate format before writing
-            if [[ "$issue_id" =~ ^I_ ]]; then
+            if [[ "$issue_id" =~ ^I_[a-zA-Z0-9]+$ ]]; then
               echo "issue_id=$issue_id" >> $GITHUB_OUTPUT
             else
               echo "::error::Invalid issue_id format: '$issue_id'"
