@@ -39,7 +39,8 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
         env:
-          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+          GH_TOKEN: ${{ github.token }}
+
 
       - name: Create review issue
         if: steps.parse.outputs.open_review == 'true' && steps.exists.outputs.exists == 'false'
