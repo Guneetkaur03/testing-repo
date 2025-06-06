@@ -1,4 +1,4 @@
-name: Create Review Issue on Issue Close
+name: Create Review Issue on Close
 
 on:
   issues:
@@ -13,12 +13,15 @@ jobs:
 
     env:
       GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+      # Use inputs.project-url if available (for workflow_call), else fallback to hardcoded value
+      PROJECT_URL: ${{ inputs.project-url || 'https://github.com/users/Guneetkaur03/projects/2' }}
 
     steps:
-      - name: Parse issue body
+      - name: Parse trigger issue
         id: parse
         run: |
           BODY="${{ github.event.issue.body }}"
+          TITLE="${{ github.event.issue.title }}"
 
           OPEN_REVIEW=$(echo "$BODY" | grep -i "Open Review Issue:" | grep -oEi "true|false" | head -n1)
           ASSIGNEE=$(echo "$BODY" | grep -i "Assign To:" | sed -E 's/.*Assign To:\s*//i' | sed 's/@//g' | xargs)
@@ -26,8 +29,20 @@ jobs:
           echo "open_review=${OPEN_REVIEW,,}" >> $GITHUB_OUTPUT
           echo "assignee=$ASSIGNEE" >> $GITHUB_OUTPUT
 
+      - name: Check if review issue already exists
+        id: exists
+        run: |
+          result=$(gh issue list --search "Review Issue ${{ github.event.issue.number }} in:title" --json number,title --jq ".[] | select(.title == \"Review Issue ${{ github.event.issue.number }}\")")
+          if [[ -n "$result" ]]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+
       - name: Create review issue
-        if: steps.parse.outputs.open_review == 'true'
+        if: steps.parse.outputs.open_review == 'true' && steps.exists.outputs.exists == 'false'
         id: new_issue
         uses: actions/github-script@v6
         with:
@@ -44,93 +59,94 @@ jobs:
             core.setOutput("issue_number", newIssue.data.number);
             core.setOutput("node_id", newIssue.data.node_id);
 
-      - name: Add new issue to "Pontem Scheduling" project
-        uses: actions/github-script@v6
-        id: project_item
+      - name: Add to Pontem Scheduling project and set status to Ready
+        if: steps.new_issue.outputs.node_id
         env:
           GH_TOKEN: ${{ secrets.PROJECT_PAT }}
-        with:
-          script: |
-            const issueNodeId = "${{ steps.new_issue.outputs.node_id }}";
-            const org = context.repo.owner;
-            const desiredProjectName = "Pontem Scheduling";
+          ISSUE_ID: ${{ steps.new_issue.outputs.node_id }}
+          PROJECT_URL: ${{ env.PROJECT_URL }}
+        run: |
+          set -euo pipefail
 
-            const projectRes = await github.graphql(`
-              query($org: String!) {
-                organization(login: $org) {
-                  projectsV2(first: 100) {
-                    nodes { id name }
-                  }
-                }
-              }`, { org });
+          url="$PROJECT_URL"
+          org=$(echo "$url" | awk -F'orgs/' '{print $2}' | cut -d/ -f1)
+          num=$(echo "$url" | awk -F'projects/' '{print $2}' | cut -d/ -f1)
 
-            const project = projectRes.organization.projectsV2.nodes.find(p => p.name === desiredProjectName);
-            if (!project) throw new Error(`❌ Project "${desiredProjectName}" not found`);
+          proj_node=$(gh api graphql -f query='
+            query($org:String!){
+              organization(login:$org){
+                projectsV2(first:100){ nodes{ number id } }
+              }
+            }' -f org="$org" \
+            --jq '.data.organization.projectsV2.nodes[]
+                  | select(.number=='"$num"')
+                  | .id')
 
-            const addedItem = await github.graphql(`
-              mutation($projectId: ID!, $contentId: ID!) {
-                addProjectV2ItemById(input: {
-                  projectId: $projectId,
-                  contentId: $contentId
-                }) {
-                  item { id }
-                }
-              }`, {
-                projectId: project.id,
-                contentId: issueNodeId
-              });
-
-            core.setOutput("project_id", project.id);
-            core.setOutput("item_id", addedItem.addProjectV2ItemById.item.id);
-
-      - name: Set Status to Ready in Pontem Scheduling
-        uses: actions/github-script@v6
-        env:
-          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
-        with:
-          script: |
-            const projectId = "${{ steps.project_item.outputs.project_id }}";
-            const itemId = "${{ steps.project_item.outputs.item_id }}";
-            const statusFieldName = "Status";
-            const desiredStatus = "Ready";
-
-            const fieldsRes = await github.graphql(`
-              query($projectId: ID!) {
-                node(id: $projectId) {
-                  ... on ProjectV2 {
-                    fields(first: 50) {
-                      nodes {
-                        id
-                        name
-                        ... on ProjectV2SingleSelectField {
-                          options { id name }
-                        }
-                      }
+          item=$(gh api graphql -f query='
+            query($proj:ID!){
+              node(id:$proj){
+                ... on ProjectV2{
+                  items(first:100){
+                    nodes{
+                      id
+                      content{ ... on Issue{ id } }
                     }
                   }
                 }
-              }`, { projectId });
+              }
+            }' -f proj="$proj_node" \
+            --jq '.data.node.items.nodes[]
+                  | select(.content.id=="'$ISSUE_ID'")
+                  | .id')
 
-            const statusField = fieldsRes.node.fields.nodes.find(f => f.name === statusFieldName);
-            if (!statusField) throw new Error(`❌ Field "${statusFieldName}" not found`);
-
-            const option = statusField.options.find(o => o.name.toLowerCase() === desiredStatus.toLowerCase());
-            if (!option) throw new Error(`❌ Option "${desiredStatus}" not found in field "${statusFieldName}"`);
-
-            await github.graphql(`
-              mutation($itemId: ID!, $fieldId: ID!, $optionId: String!) {
-                updateProjectV2ItemFieldValue(input: {
-                  projectId: "${projectId}",
-                  itemId: $itemId,
-                  fieldId: $fieldId,
-                  value: { singleSelectOptionId: $optionId }
-                }) {
-                  projectV2Item { id }
+          if [[ -z "$item" || "$item" == "null" ]]; then
+            item=$(gh api graphql -f query='
+              mutation($proj:ID!,$issue:ID!){
+                addProjectV2ItemById(input:{projectId:$proj,contentId:$issue}){
+                  item{ id }
                 }
-              }`, {
-                itemId,
-                fieldId: statusField.id,
-                optionId: option.id
-              });
+              }' -f proj="$proj_node" -f issue="$ISSUE_ID" \
+              --jq '.data.addProjectV2ItemById.item.id')
+          fi
 
-            console.log(`✅ Status set to "${desiredStatus}" in project "Pontem Scheduling"`);
+          # Set Status = Ready
+          field_id=$(gh api graphql -f query='
+            query($proj:ID!){
+              node(id:$proj){
+                ... on ProjectV2{
+                  fields(first:50){ nodes {
+                    id
+                    name
+                    ... on ProjectV2SingleSelectField { options { id name } }
+                  }}
+                }
+              }
+            }' -f proj="$proj_node" \
+            --jq '.data.node.fields.nodes[] | select(.name=="Status") | .id')
+
+          ready_option=$(gh api graphql -f query='
+            query($proj:ID!){
+              node(id:$proj){
+                ... on ProjectV2{
+                  fields(first:50){ nodes {
+                    name
+                    ... on ProjectV2SingleSelectField { options { id name } }
+                  }}
+                }
+              }
+            }' -f proj="$proj_node" \
+            --jq '.data.node.fields.nodes[]
+                  | select(.name=="Status")
+                  | .options[] | select(.name=="Ready") | .id')
+
+          gh api graphql -f query='
+            mutation($proj:ID!,$item:ID!,$field:ID!,$option:ID!){
+              updateProjectV2ItemFieldValue(input:{
+                projectId:$proj,
+                itemId:$item,
+                fieldId:$field,
+                value:{singleSelectOptionId:$option}
+              }) {
+                projectV2Item { id }
+              }
+            }'
