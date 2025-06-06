@@ -49,28 +49,19 @@ jobs:
 
           # Check if the review issue already exists
           REVIEW_TITLE="Review Issue $ISSUE_NUMBER"
-          issue=$(gh api graphql -f query='
-            query($owner:String!, $repo:String!) {
-              repository(owner:$owner, name:$repo) {
-                issues(first:100, orderBy: {field: CREATED_AT, direction: DESC}) {
-                  nodes {
-                    number
-                    title
-                    state
-                    id
-                  }
-                }
-              }
-            }' \
-            -f owner="${{ github.repository_owner }}" \
-            -f repo="$(basename $GITHUB_REPOSITORY)" \
-            --jq '.data.repository.issues.nodes[] | select(.title == "Review Issue '"$ISSUE_NUMBER"'")')
+          issue=$(gh issue list \
+                  --state "all" \
+                  --search "$REVIEW_TITLE in:title" \
+                  --json number,title,state,id \
+                  --jq '.[] | select(.title == "$REVIEW_TITLE")')
 
+          echo "::debug::Issue JSON: $issue"
           if [[ -n "$issue" ]]; then
             state=$(echo "$issue" | jq -r '.state')
             issue_number=$(echo "$issue" | jq -r '.number')
             
-            issue_id=$(echo "$issue" | jq -r '.id' | tr -d '\n')
+            # Extract the issue ID from the list and format it
+            issue_id=$(echo "$issue" | jq -r '.[0].id' | tr -d '\r\n')
             echo "Review issue found: #$issue_number ($state)"
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "::info::issue json: $issue"
