@@ -26,10 +26,21 @@ jobs:
           BODY="${{ github.event.issue.body }}"
           TITLE="${{ github.event.issue.title }}"
 
+          if [[ "$TITLE" == Review\ Issue* ]]; then
+            echo "⏭ Skipping: This is already a review issue"
+            exit 0
+          fi
+
           OPEN_REVIEW=$(echo "$BODY" | grep -i "Open Review Issue:" | grep -oEi "true|false" | head -n1)
+          OPEN_REVIEW=${OPEN_REVIEW,,}
+          if [[ -z "$OPEN_REVIEW" || "$OPEN_REVIEW" != "true" ]]; then
+            echo "⏭ Skipping: Open Review Issue not set to true"
+            exit 0
+          fi
+
           ASSIGNEE=$(echo "$BODY" | grep -i "Assign To:" | sed -E 's/.*Assign To:\s*//i' | sed 's/@//g' | xargs)
 
-          echo "open_review=${OPEN_REVIEW,,}" >> $GITHUB_OUTPUT
+          echo "open_review=$OPEN_REVIEW" >> $GITHUB_OUTPUT
           echo "assignee=$ASSIGNEE" >> $GITHUB_OUTPUT
 
       # Step 1: Find if the Review Issue already exists and reopen if closed
