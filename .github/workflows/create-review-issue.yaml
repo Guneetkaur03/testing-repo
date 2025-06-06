@@ -53,14 +53,12 @@ jobs:
                   --state "all" \
                   --search "$REVIEW_TITLE in:title" \
                   --json number,title,state,id \
-                  --jq '.[] | select(.title == "$REVIEW_TITLE")')
+                  --jq '[.[] | select(.title == "'"$REVIEW_TITLE"'")]')
 
           echo "::debug::Issue JSON: $issue"
           if [[ -n "$issue" ]]; then
-            state=$(echo "$issue" | jq -r '.state')
-            issue_number=$(echo "$issue" | jq -r '.number')
-            
-            # Extract the issue ID from the list and format it
+            state=$(echo "$issue" | jq -r '.[0].state')
+            issue_number=$(echo "$issue" | jq -r '.[0].number')
             issue_id=$(echo "$issue" | jq -r '.[0].id' | tr -d '\r\n')
             echo "Review issue found: #$issue_number ($state)"
             echo "exists=true" >> $GITHUB_OUTPUT
