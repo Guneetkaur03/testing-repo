@@ -1,0 +1,84 @@
+name: Create Testing Issue on Issue Close
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  create_testing_issue:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+
+    steps:
+      - name: Parse issue body
+        id: parse
+        run: |
+          BODY="${{ github.event.issue.body }}"
+
+          # Parse flags
+          OPEN_TESTING=$(echo "$BODY" | grep -i "Open Testing Issue:" | grep -oEi "true|false" | head -n1)
+          ASSIGNEE=$(echo "$BODY" | grep -i "Assign To:" | sed -E 's/.*Assign To:\s*//i' | sed 's/@//g' | xargs)
+
+          echo "open_testing=${OPEN_TESTING,,}" >> $GITHUB_OUTPUT
+          echo "assignee=$ASSIGNEE" >> $GITHUB_OUTPUT
+
+      - name: Create testing issue
+        if: steps.parse.outputs.open_testing == 'true'
+        id: new_issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const original = context.payload.issue;
+            const newIssue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Testing Issue ${original.number}`,
+              body: `Auto-generated testing issue for [#${original.number}](${original.html_url})`,
+              assignees: ['${{ steps.parse.outputs.assignee }}'],
+              labels: ['testing']
+            });
+            core.setOutput("issue_number", newIssue.data.number);
+            core.setOutput("node_id", newIssue.data.node_id);
+
+      - name: Add new issue to GitHub Project
+        uses: actions/github-script@v6
+        env:
+          PROJECT_URL: ${{ secrets.PROJECT_URL }}         # e.g. https://github.com/orgs/<org>/projects/1
+        with:
+          script: |
+            const { PROJECT_URL } = process.env;
+            const issueNodeId = "${{ steps.new_issue.outputs.node_id }}";
+
+            const [_, org, number] = PROJECT_URL.match(/orgs\/([^/]+)\/projects\/(\d+)/);
+            const projRes = await github.graphql(`
+              query($org: String!) {
+                organization(login: $org) {
+                  projectsV2(first: 100) {
+                    nodes { number id }
+                  }
+                }
+              }`, { org });
+
+            const projId = projRes.organization.projectsV2.nodes
+              .find(p => p.number == number)?.id;
+
+            if (!projId) {
+              throw new Error(`Project ${number} not found`);
+            }
+
+            await github.graphql(`
+              mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                  item { id }
+                }
+              }`, {
+                projectId: projId,
+                contentId: issueNodeId
+              });
+
+            console.log(`✅ Added issue to project: ${PROJECT_URL}`);
