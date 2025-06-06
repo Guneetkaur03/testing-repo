@@ -75,6 +75,20 @@ jobs:
           set -euo pipefail
 
           url="$PROJECT_URL"
+          user=$(echo "$url" | awk -F'users/' '{print $2}' | cut -d/ -f1)
+          num=$(echo "$url" | awk -F'projects/' '{print $2}' | cut -d/ -f1)
+
+          proj_node=$(gh api graphql -f query='
+            query($user:String!){
+              user(login:$user){
+                projectsV2(first:100){ nodes{ number id } }
+              }
+            }' -f user="$user" \
+            --jq '.data.user.projectsV2.nodes[]
+                  | select(.number=='"$num"')
+                  | .id')
+
+          url="$PROJECT_URL"
           org=$(echo "$url" | awk -F'orgs/' '{print $2}' | cut -d/ -f1)
           num=$(echo "$url" | awk -F'projects/' '{print $2}' | cut -d/ -f1)
 
