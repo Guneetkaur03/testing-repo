@@ -149,4 +149,7 @@ jobs:
               }) {
                 projectV2Item { id }
               }
-            }'
+            }' \
+            -f proj="$proj_node" -f item="$item" -f field="$field_id" -f option="$ready_option"
+
+          echo "✅ Review issue added and marked Ready"
