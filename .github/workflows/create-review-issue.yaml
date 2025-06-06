@@ -19,9 +19,13 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
-      - name: Parse trigger issue
-        id: parse
+          
+      # Step 1: Find if the Review Issue already exists and reopen if closed
+      - name: Find or reopen review issue
+        id: review_issue_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           BODY="${{ github.event.issue.body }}"
           TITLE="${{ github.event.issue.title }}"
@@ -43,13 +47,6 @@ jobs:
           echo "open_review=$OPEN_REVIEW" >> $GITHUB_OUTPUT
           echo "assignee=$ASSIGNEE" >> $GITHUB_OUTPUT
 
-      # Step 1: Find if the Review Issue already exists and reopen if closed
-      - name: Find or reopen review issue
-        id: review_issue_check
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        run: |
           REVIEW_TITLE="Review Issue $ISSUE_NUMBER"
           issue=$(gh api graphql -f query='
             query($owner:String!, $repo:String!) {
