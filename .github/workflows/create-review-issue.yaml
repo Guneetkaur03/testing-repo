@@ -47,6 +47,7 @@ jobs:
           echo "open_review=$OPEN_REVIEW" >> $GITHUB_OUTPUT
           echo "assignee=$ASSIGNEE" >> $GITHUB_OUTPUT
 
+          # Check if the review issue already exists
           REVIEW_TITLE="Review Issue $ISSUE_NUMBER"
           issue=$(gh api graphql -f query='
             query($owner:String!, $repo:String!) {
@@ -71,7 +72,13 @@ jobs:
             issue_id=$(echo "$issue" | jq -r '.id')
             echo "Review issue found: #$issue_number ($state)"
             echo "exists=true" >> $GITHUB_OUTPUT
-            # echo "issue_id=$issue_id" >> $GITHUB_OUTPUT
+            # Validate format before writing
+            if [[ "$issue_id" =~ ^I_ ]]; then
+              echo "issue_id=$issue_id" >> $GITHUB_OUTPUT
+            else
+              echo "::error::Invalid issue_id format: '$issue_id'"
+              exit 1
+            fi
 
             if [[ "$state" == "CLOSED" ]]; then
               echo "🔁 Reopening closed issue #$issue_number"
