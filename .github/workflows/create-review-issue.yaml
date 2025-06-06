@@ -109,7 +109,10 @@ jobs:
           url="$PROJECT_URL"
           user=$(echo "$url" | awk -F'users/' '{print $2}' | cut -d/ -f1)
           num=$(echo "$url" | awk -F'projects/' '{print $2}' | cut -d/ -f1)
-          ISSUE_ID=${{ steps.new_issue.outputs.node_id || steps.review_issue_check.outputs.issue_id }}
+          ISSUE_ID="${{ steps.new_issue.outputs.node_id }}"
+          if [[ -z "$ISSUE_ID" ]]; then
+            ISSUE_ID="${{ steps.review_issue_check.outputs.issue_id }}"
+          fi
 
           proj_node=$(gh api graphql -f query='
             query($user:String!){
