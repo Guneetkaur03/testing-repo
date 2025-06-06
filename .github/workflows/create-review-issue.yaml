@@ -17,6 +17,9 @@ jobs:
       PROJECT_URL: ${{ inputs.project-url || 'https://github.com/users/Guneetkaur03/projects/2' }}
 
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Parse trigger issue
         id: parse
         run: |
