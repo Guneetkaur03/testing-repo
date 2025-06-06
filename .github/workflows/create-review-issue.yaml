@@ -71,7 +71,7 @@ jobs:
             issue_id=$(echo "$issue" | jq -r '.id')
             echo "Review issue found: #$issue_number ($state)"
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "issue_id=$issue_id" >> $GITHUB_OUTPUT
+            # echo "issue_id=$issue_id" >> $GITHUB_OUTPUT
 
             if [[ "$state" == "CLOSED" ]]; then
               echo "🔁 Reopening closed issue #$issue_number"
